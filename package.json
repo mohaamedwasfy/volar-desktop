@@ -12,7 +12,7 @@
     "dev:packaged-ui": "electron . --profile=dev --api=http://localhost:4000/v1",
     "build:ui": "node scripts/build-ui.mjs",
     "dist": "npm run build:ui && electron-builder --win nsis",
-    "release": "npm run build:ui && electron-builder --win nsis --publish always"
+    "release": "npm run build:ui && node scripts/ensure-release.mjs && electron-builder --win nsis --publish always"
   },
   "build": {
     "appId": "com.volar.desktop",

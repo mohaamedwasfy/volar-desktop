@@ -20,10 +20,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: desktop
+      # volar-dashboard is private: this workflow's own token can't read it
+      - name: A token that can read volar-dashboard
+        shell: bash
+        env:
+          ADMIN_REPO_TOKEN: ${{ secrets.ADMIN_REPO_TOKEN }}
+        run: |
+          [ -n "$ADMIN_REPO_TOKEN" ] || { echo "::error::Add the ADMIN_REPO_TOKEN secret (Settings → Secrets and variables → Actions): a fine-grained token with read access to the contents of mohaamedwasfy/volar-dashboard."; exit 1; }
       - uses: actions/checkout@v4
         with:
           repository: mohaamedwasfy/volar-dashboard
-          token: ${{ secrets.ADMIN_REPO_TOKEN || github.token }}
+          token: ${{ secrets.ADMIN_REPO_TOKEN }}
           path: admin
       - uses: actions/setup-node@v4
         with:
