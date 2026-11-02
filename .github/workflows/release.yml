@@ -1,0 +1,30 @@
+# Builds the Windows installer and publishes it as a GitHub Release when a version tag is
+# pushed (git tag v0.1.1 && git push origin v0.1.1). The installed apps find it there and
+# update themselves. The tag must match "version" in package.json.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: The tag matches package.json
+        shell: bash
+        run: |
+          v="$(node -p "require('./package.json').version")"
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} but package.json says $v"; exit 1; }
+      - run: npm ci
+      - run: npm run release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

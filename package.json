@@ -1,0 +1,55 @@
+{
+  "name": "volar-desktop",
+  "productName": "VOLAR",
+  "version": "0.1.0",
+  "description": "VOLAR for the shop's computers: the dashboard and the till, with silent printing to the branch's printers.",
+  "private": true,
+  "main": "src/main.js",
+  "author": "VOLAR",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --server=http://localhost:3002",
+    "dist": "electron-builder --win nsis",
+    "release": "electron-builder --win nsis --publish always"
+  },
+  "build": {
+    "appId": "com.volar.desktop",
+    "productName": "VOLAR",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "VOLAR"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "mohaamedwasfy",
+        "repo": "volar-desktop",
+        "releaseType": "release"
+      }
+    ]
+  },
+  "devDependencies": {
+    "electron": "^45.2.1",
+    "electron-builder": "^26.18.0"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mohaamedwasfy/volar-desktop.git"
+  }
+}

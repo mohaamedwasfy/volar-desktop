@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:" />
+  <title>إعدادات الجهاز</title>
+  <link rel="stylesheet" href="ui.css" />
+</head>
+<body>
+  <main class="wrap">
+    <header>
+      <div class="mark">V</div>
+      <div>
+        <h1>إعدادات الجهاز</h1>
+        <p class="muted">الكمبيوتر ده بس. افتحها في أي وقت بـ <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd></p>
+      </div>
+    </header>
+
+    <section>
+      <label for="serverUrl">عنوان لوحة التحكم</label>
+      <input id="serverUrl" dir="ltr" placeholder="https://…" autocomplete="off" />
+      <p class="hint">العنوان اللي بتفتح منه اللوحة. نفس العنوان في كل الفروع.</p>
+    </section>
+
+    <section>
+      <div class="row">
+        <label for="receiptPrinter">طابعة الإيصالات</label>
+        <button type="button" class="link" data-test="receipt">طباعة تجربة</button>
+      </div>
+      <select id="receiptPrinter"></select>
+      <p class="hint">الإيصال بيطلع عليها على طول من غير نافذة الطباعة. سيبها فاضية تظهر النافذة كل مرة.</p>
+    </section>
+
+    <section>
+      <div class="row">
+        <label for="labelPrinter">طابعة الباركود (الملصقات)</label>
+        <button type="button" class="link" data-test="labels">طباعة تجربة</button>
+      </div>
+      <select id="labelPrinter"></select>
+    </section>
+
+    <section class="switches">
+      <label class="switch"><input type="checkbox" id="kiosk" /> <span>ملء الشاشة دايمًا (وضع الكاشير)</span></label>
+      <label class="switch"><input type="checkbox" id="startWithWindows" /> <span>يفتح لوحده مع تشغيل الكمبيوتر</span></label>
+    </section>
+
+    <section id="update" class="update" hidden>
+      <span id="updateText"></span>
+      <button type="button" id="installUpdate" class="link" hidden>ثبّته دلوقتي</button>
+    </section>
+
+    <p id="msg" role="status" class="msg"></p>
+
+    <footer>
+      <span class="muted" id="about"></span>
+      <button type="button" id="save" class="primary">حفظ</button>
+    </footer>
+  </main>
+  <script src="settings.js"></script>
+</body>
+</html>
