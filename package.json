@@ -1,16 +1,18 @@
 {
   "name": "volar-desktop",
   "productName": "VOLAR",
-  "version": "0.1.0",
-  "description": "VOLAR for the shop's computers: the dashboard and the till, with silent printing to the branch's printers.",
+  "version": "0.5.2",
+  "description": "VOLAR for the shop's computers: its own program, working with or without internet.",
   "private": true,
   "main": "src/main.js",
   "author": "VOLAR",
   "scripts": {
     "start": "electron .",
-    "dev": "electron . --server=http://localhost:3002",
-    "dist": "electron-builder --win nsis",
-    "release": "electron-builder --win nsis --publish always"
+    "dev": "electron . --profile=dev --ui=http://localhost:3002 --api=http://localhost:4000/v1",
+    "dev:packaged-ui": "electron . --profile=dev --api=http://localhost:4000/v1",
+    "build:ui": "node scripts/build-ui.mjs",
+    "dist": "npm run build:ui && electron-builder --win nsis",
+    "release": "npm run build:ui && electron-builder --win nsis --publish always"
   },
   "build": {
     "appId": "com.volar.desktop",
@@ -20,17 +22,22 @@
       "package.json"
     ],
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "build"
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "shortcutName": "VOLAR"
+      "shortcutName": "VOLAR",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico"
     },
     "publish": [
       {
@@ -38,6 +45,15 @@
         "owner": "mohaamedwasfy",
         "repo": "volar-desktop",
         "releaseType": "release"
+      }
+    ],
+    "extraResources": [
+      {
+        "from": "ui",
+        "to": "ui",
+        "filter": [
+          "**/*"
+        ]
       }
     ]
   },

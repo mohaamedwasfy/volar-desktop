@@ -1,21 +1,42 @@
 // @ts-check
 /**
- * What the dashboard can ask of this computer, as `window.volarDesktop`. Nothing else of
- * Electron or Node reaches the page. The main process checks every call comes from the
- * dashboard's own address.
+ * What the screens can ask of the program, as `window.volarDesktop`. Nothing else of
+ * Electron or Node reaches them, and the main process checks every call comes from the
+ * program's own screens (volar://app).
  */
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("volarDesktop", {
-  /** { version, deviceId, printers: { receipt, labels } } — whether a printer is set for each */
+  /** The API, called by the program (signed in as an app; the tokens never come here). */
+  api: {
+    request: (/** @type {unknown} */ r) => ipcRenderer.invoke("api:request", r),
+    refresh: () => ipcRenderer.invoke("api:refresh"),
+    ping: () => ipcRenderer.invoke("api:ping"),
+  },
+  /** This computer: its branch and staff (set up once by the owner), and who is using it. */
+  device: {
+    state: () => ipcRenderer.invoke("device:state"),
+    setup: (/** @type {unknown} */ d) => ipcRenderer.invoke("device:setup", d),
+    unlock: (/** @type {string} */ userId, /** @type {string} */ pin) => ipcRenderer.invoke("device:unlock", userId, pin),
+    lock: () => ipcRenderer.invoke("device:lock"),
+    /** a sign-in QR for the phone app */
+    qrStart: () => ipcRenderer.invoke("device:qr-start"),
+    /** was it confirmed on a phone? (then that person is signed in here) */
+    qrClaim: (/** @type {string} */ id) => ipcRenderer.invoke("device:qr-claim", id),
+    /** the owner locked it, signed everyone out or stopped it from the dashboard */
+    onChange: (/** @type {() => void} */ cb) => {
+      const h = () => cb();
+      ipcRenderer.on("device:changed", h);
+      return () => ipcRenderer.removeListener("device:changed", h);
+    },
+  },
+  /** { version, deviceId, printers: { receipt, labels } } */
   info: () => ipcRenderer.invoke("desktop:info"),
   /**
-   * Print the page as its print styles lay it out: "receipt" and "labels" go straight to the
-   * printer chosen for them (no dialog), "page" (A4 and anything else) shows the usual dialog.
+   * Print the page as its print styles lay it out: receipts and labels straight to their
+   * printer (no dialog), "page" with the usual dialog.
    * @param {"receipt" | "labels" | "page"} kind
-   * @returns {Promise<{ ok: boolean, error?: string }>}
    */
   print: (kind) => ipcRenderer.invoke("desktop:print", kind),
-  /** This computer's settings window (printers, full screen, start with Windows). */
   openSettings: () => ipcRenderer.send("desktop:settings"),
 });

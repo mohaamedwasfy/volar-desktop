@@ -1,6 +1,9 @@
 # Builds the Windows installer and publishes it as a GitHub Release when a version tag is
-# pushed (git tag v0.1.1 && git push origin v0.1.1). The installed apps find it there and
-# update themselves. The tag must match "version" in package.json.
+# pushed (npm version patch && git push origin main --follow-tags). The installed programs
+# find it there and update themselves. The tag must match "version" in package.json.
+#
+# The screens are packaged from Volar-admin (mohaamedwasfy/volar-dashboard): if that repo is
+# private, add a token that can read it as the ADMIN_REPO_TOKEN secret.
 name: release
 
 on:
@@ -15,16 +18,28 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: desktop
+      - uses: actions/checkout@v4
+        with:
+          repository: mohaamedwasfy/volar-dashboard
+          token: ${{ secrets.ADMIN_REPO_TOKEN || github.token }}
+          path: admin
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
       - name: The tag matches package.json
         shell: bash
+        working-directory: desktop
         run: |
           v="$(node -p "require('./package.json').version")"
           [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} but package.json says $v"; exit 1; }
       - run: npm ci
+        working-directory: admin
+      - run: npm ci
+        working-directory: desktop
       - run: npm run release
+        working-directory: desktop
         env:
+          ADMIN_DIR: ../admin
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

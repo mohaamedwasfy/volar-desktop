@@ -12,7 +12,7 @@ const msg = (/** @type {string} */ text, ok = false) => {
 async function fill() {
   const [cfg, printers] = await Promise.all([api.get(), api.printers()]);
   if (!cfg) return;
-  $("serverUrl").value = cfg.serverUrl || "";
+  $("branch").textContent = cfg.device ? `${cfg.device.branchName} · ${cfg.device.staff.length} موظف` : "لسه متعملهوش إعداد";
   for (const id of ["receiptPrinter", "labelPrinter"]) {
     const sel = $(id);
     sel.innerHTML = "";
@@ -51,19 +51,17 @@ async function fill() {
     $("updateText").textContent = text;
     $("installUpdate").hidden = u.state !== "ready";
   }
-  if (!cfg.serverUrl) $("serverUrl").focus();
 }
 
 async function save() {
   msg("");
   const r = await api.save({
-    serverUrl: $("serverUrl").value,
     receiptPrinter: $("receiptPrinter").value,
     labelPrinter: $("labelPrinter").value,
     kiosk: $("kiosk").checked,
     startWithWindows: $("startWithWindows").checked,
   });
-  if (r.ok) msg("اتحفظ.", true);
+  if (r.ok) msg(r.reachable ? "اتحفظ، والسيرفر بيرد." : "اتحفظ، بس السيرفر مش بيرد دلوقتي (النت أو العنوان).", r.reachable);
   else msg(r.error || "مقدرتش أحفظ");
   return r.ok;
 }
