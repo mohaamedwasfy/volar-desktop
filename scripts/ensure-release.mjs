@@ -13,7 +13,13 @@ const all = await fetch(`${api}/releases?per_page=100`, { headers }).then((r) =>
 if (Array.isArray(all) && all.some((r) => r.tag_name === tag)) {
   console.log(`release ${tag} is there`);
 } else {
-  const r = await fetch(`${api}/releases`, { method: "POST", headers, body: JSON.stringify({ tag_name: tag, name: version, draft: false }) });
+  // GitHub sometimes answers 5xx for a moment: a few tries, a little apart
+  let r;
+  for (let i = 0; i < 4; i++) {
+    r = await fetch(`${api}/releases`, { method: "POST", headers, body: JSON.stringify({ tag_name: tag, name: version, draft: false }) });
+    if (r.ok || r.status < 500) break;
+    await new Promise((ok) => setTimeout(ok, 3000 * (i + 1)));
+  }
   if (!r.ok) throw new Error(`creating release ${tag}: ${r.status} ${await r.text()}`);
   console.log(`made release ${tag}`);
 }
