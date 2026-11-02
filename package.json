@@ -12,7 +12,9 @@
     "dev:packaged-ui": "electron . --profile=dev --api=http://localhost:4000/v1",
     "build:ui": "node scripts/build-ui.mjs",
     "dist": "npm run build:ui && electron-builder --win nsis",
-    "release": "npm run build:ui && node scripts/ensure-release.mjs && electron-builder --win nsis --publish always"
+    "release": "npm run build:ui && node scripts/ensure-release.mjs && electron-builder --win nsis --publish always",
+    "dist:mac": "npm run build:ui && electron-builder --mac",
+    "release:mac": "npm run build:ui && node scripts/ensure-release.mjs && electron-builder --mac --publish always"
   },
   "build": {
     "appId": "com.volar.desktop",
@@ -38,6 +40,33 @@
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "installerHeaderIcon": "build/icon.ico"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "category": "public.app-category.business",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "artifactName": "VOLAR-${version}-mac-${arch}.${ext}"
+    },
+    "dmg": {
+      "title": "VOLAR",
+      "artifactName": "VOLAR-${version}-mac-${arch}.${ext}"
     },
     "publish": [
       {

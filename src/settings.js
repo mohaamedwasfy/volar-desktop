@@ -43,13 +43,15 @@ async function fill() {
     checking: "بيدوّر على تحديث…",
     downloading: `بينزّل الإصدار ${u.version}…`,
     ready: `الإصدار ${u.version} جاهز: هيتثبت لوحده لما تقفل البرنامج.`,
+    manual: `فيه إصدار جديد ${u.version}: نزّله وثبّته فوق القديم.`,
     latest: "عندك آخر إصدار.",
     error: "مقدرتش أدوّر على تحديثات دلوقتي.",
   }[u.state];
   if (text) {
     $("update").hidden = false;
     $("updateText").textContent = text;
-    $("installUpdate").hidden = u.state !== "ready";
+    $("installUpdate").hidden = u.state !== "ready" && u.state !== "manual";
+    $("installUpdate").textContent = u.state === "manual" ? "صفحة التنزيل" : "ثبّته دلوقتي";
   }
 }
 

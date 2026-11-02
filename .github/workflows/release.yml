@@ -1,9 +1,10 @@
-# Builds the Windows installer and publishes it as a GitHub Release when a version tag is
-# pushed (npm version patch && git push origin main --follow-tags). The installed programs
-# find it there and update themselves. The tag must match "version" in package.json.
+# Builds the Windows installer and the Mac .dmg files and publishes them as one GitHub Release
+# when a version tag is pushed (npm version patch && git push origin main --follow-tags). The
+# installed Windows programs find it there and update themselves; Macs are told it's out.
+# The tag must match "version" in package.json.
 #
-# The screens are packaged from Volar-admin (mohaamedwasfy/volar-dashboard): if that repo is
-# private, add a token that can read it as the ADMIN_REPO_TOKEN secret.
+# The screens are packaged from Volar-admin (mohaamedwasfy/volar-dashboard): it's private, so
+# a token that can read it goes in the ADMIN_REPO_TOKEN secret.
 name: release
 
 on:
@@ -14,19 +15,45 @@ permissions:
   contents: write
 
 jobs:
-  windows:
-    runs-on: windows-latest
+  # one job makes the release; the two builds only add their files to it (two builds each
+  # making it once gave two releases with the same tag)
+  release:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          path: desktop
-      # volar-dashboard is private: this workflow's own token can't read it
+          node-version: 22
       - name: A token that can read volar-dashboard
-        shell: bash
         env:
           ADMIN_REPO_TOKEN: ${{ secrets.ADMIN_REPO_TOKEN }}
         run: |
           [ -n "$ADMIN_REPO_TOKEN" ] || { echo "::error::Add the ADMIN_REPO_TOKEN secret (Settings → Secrets and variables → Actions): a fine-grained token with read access to the contents of mohaamedwasfy/volar-dashboard."; exit 1; }
+      - name: The tag matches package.json
+        run: |
+          v="$(node -p "require('./package.json').version")"
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} but package.json says $v"; exit 1; }
+      - run: node scripts/ensure-release.mjs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            args: --win nsis
+          # Apple-chip and Intel Macs: one .dmg each. Not signed by Apple (that needs a paid
+          # account), so the first open needs "Open Anyway" and updates are installed by hand.
+          - os: macos-latest
+            args: --mac
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: desktop
       - uses: actions/checkout@v4
         with:
           repository: mohaamedwasfy/volar-dashboard
@@ -35,18 +62,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: The tag matches package.json
-        shell: bash
-        working-directory: desktop
-        run: |
-          v="$(node -p "require('./package.json').version")"
-          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} but package.json says $v"; exit 1; }
       - run: npm ci
         working-directory: admin
       - run: npm ci
         working-directory: desktop
-      - run: npm run release
+      - run: npm run build:ui
         working-directory: desktop
         env:
           ADMIN_DIR: ../admin
+      - run: npx electron-builder ${{ matrix.args }} --publish always
+        working-directory: desktop
+        env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # no Apple certificate here: don't go looking for one
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
