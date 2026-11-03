@@ -1,7 +1,7 @@
 {
   "name": "volar-desktop",
   "productName": "VOLAR",
-  "version": "0.5.9",
+  "version": "0.5.10",
   "description": "VOLAR for the shop's computers: its own program, working with or without internet.",
   "private": true,
   "main": "src/main.js",
