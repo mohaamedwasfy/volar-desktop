@@ -145,14 +145,51 @@ async function printers() {
   return (await wc.getPrintersAsync()).map((p) => ({ name: p.name, displayName: p.displayName || p.name, isDefault: !!p.isDefault }));
 }
 
+/** How receipt and label printers usually name themselves, to find them when none was chosen in the settings. */
+const PRINTER_NAMES = {
+  receipt: /receipt|thermal|\bpos\b|pos-?\d|tm-?[a-z]?\d|xp-?80|80mm/i,
+  labels: /label|barcode|zebra|tsc|godex|gprinter|xp-?3\d\d|xp-?4\d\d/i,
+};
+
 /**
+ * The printer for a kind: the one chosen in the settings; none chosen, the only printer whose name
+ * says it's that kind. Two candidates or none: the usual dialog, never a guess.
  * @param {Electron.WebContents} wc
  * @param {"receipt" | "labels" | "page"} kind
  */
-function printOn(wc, kind) {
-  const deviceName = kind === "receipt" ? cfg.receiptPrinter : kind === "labels" ? cfg.labelPrinter : "";
+async function printerFor(wc, kind) {
+  if (kind === "page") return "";
+  const chosen = kind === "receipt" ? cfg.receiptPrinter : cfg.labelPrinter;
+  if (chosen) return chosen;
+  const found = (await wc.getPrintersAsync()).filter((p) => PRINTER_NAMES[kind].test(p.name));
+  return found.length === 1 ? found[0].name : "";
+}
+
+/**
+ * The paper comes from the screen that knows it (a receipt's real length, the label size), so a
+ * printer's own default can't turn it sideways or feed blank paper. Checked: it comes from a page.
+ * @param {unknown} page
+ * @returns {{ pageSize: string | { width: number, height: number }, margins?: { marginType: "none" } } | {}}
+ */
+function paperOf(page) {
+  if (typeof page !== "object" || !page) return {};
+  const { widthMm, heightMm, paper } = /** @type {any} */ (page);
+  if (paper === "A4") return { pageSize: "A4" };
+  const ok = (/** @type {unknown} */ n, /** @type {number} */ min, /** @type {number} */ max) => typeof n === "number" && Number.isFinite(n) && n >= min && n <= max;
+  if (!ok(widthMm, 20, 300) || !ok(heightMm, 10, 2000)) return {};
+  // Electron takes microns here
+  return { pageSize: { width: Math.round(widthMm * 1000), height: Math.round(heightMm * 1000) }, margins: { marginType: "none" } };
+}
+
+/**
+ * @param {Electron.WebContents} wc
+ * @param {"receipt" | "labels" | "page"} kind
+ * @param {unknown} [page]
+ */
+async function printOn(wc, kind, page) {
+  const deviceName = await printerFor(wc, kind);
   return new Promise((resolve) => {
-    wc.print({ silent: !!deviceName, deviceName: deviceName || undefined, printBackground: true }, (ok, reason) =>
+    wc.print({ silent: !!deviceName, deviceName: deviceName || undefined, printBackground: true, landscape: false, copies: 1, ...paperOf(page) }, (ok, reason) =>
       resolve(ok ? { ok: true } : { ok: false, error: reason === "cancelled" ? "cancelled" : reason || "failed" }),
     );
   });
@@ -205,7 +242,13 @@ ipcMain.handle("device:unlock", async (e, userId, pin) => {
   return r;
 });
 /** Sign-in with the phone app: the QR to show, then (every two seconds) whether it was confirmed. */
-ipcMain.handle("device:qr-start", (e) => (fromScreens(e) && cfg.device && !cfg.device.disabled ? api.qrStart() : { error: "refused" }));
+ipcMain.handle("device:qr-start", async (e) => {
+  if (!fromScreens(e) || !cfg.device || cfg.device.disabled) return { error: "refused" };
+  const r = await api.qrStart();
+  // refused (not just offline): it may have been removed; ask right away instead of at the next check-in
+  if ("error" in r && r.error !== "offline") void checkInNow();
+  return r;
+});
 ipcMain.handle("device:qr-claim", async (e, id) => {
   if (!fromScreens(e) || typeof id !== "string" || id.length > 64 || !cfg.device) return { status: "EXPIRED" };
   const staff = cfg.device.staff;
@@ -223,9 +266,9 @@ ipcMain.handle("device:lock", (e) => {
 ipcMain.handle("desktop:info", (e) =>
   fromScreens(e) ? { version: app.getVersion(), deviceId: cfg.deviceId, printers: { receipt: !!cfg.receiptPrinter, labels: !!cfg.labelPrinter } } : null,
 );
-ipcMain.handle("desktop:print", async (e, kind) => {
+ipcMain.handle("desktop:print", async (e, kind, page) => {
   if (!fromScreens(e) || !["receipt", "labels", "page"].includes(kind)) return { ok: false, error: "refused" };
-  return printOn(e.sender, kind);
+  return printOn(e.sender, kind, page);
 });
 ipcMain.on("desktop:settings", (e) => {
   if (fromScreens(e)) openSettings();
@@ -239,6 +282,15 @@ async function checkInNow() {
   if (!cfg?.device || !api.hasDeviceKey() || !app.isReady()) return;
   const r = await api.checkIn(app.getVersion());
   if (!r) return;
+  // deleted from the dashboard: back to a new computer, exactly like the first start
+  if (r === "removed") {
+    api.forgetAll();
+    api.setDeviceKey(null);
+    cfg = { ...cfg, device: null };
+    config.save(cfg);
+    changed();
+    return;
+  }
   let dirty = false;
   if (!!r.disabled !== !!cfg.device.disabled) {
     cfg = { ...cfg, device: { ...cfg.device, disabled: r.disabled } };

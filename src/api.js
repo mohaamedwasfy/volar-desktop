@@ -276,7 +276,8 @@ function createApi(apiBase) {
 
   /**
    * This computer checks in: on, its version, who is using it; answers what the owner asked.
-   * @returns {Promise<{ id: string, name: string, branch: { id: string, name: string }, disabled: boolean, command: "LOCK" | "SIGN_OUT" | null } | null>}
+   * "removed": the server no longer knows this computer's key (the owner deleted it).
+   * @returns {Promise<{ id: string, name: string, branch: { id: string, name: string }, disabled: boolean, command: "LOCK" | "SIGN_OUT" | null } | "removed" | null>}
    */
   async function checkIn(/** @type {string} */ appVersion) {
     load();
@@ -288,8 +289,10 @@ function createApi(apiBase) {
         body: JSON.stringify({ appVersion, currentUserId: store.current }),
         signal: AbortSignal.timeout(10_000),
       });
+      const json = await res.json().catch(() => null);
+      if (res.status === 401 && json?.error?.code === "DEVICE_REMOVED") return "removed";
       if (!res.ok) return null;
-      return (await res.json())?.data ?? null;
+      return json?.data ?? null;
     } catch {
       return null;
     }
@@ -394,7 +397,7 @@ function createApi(apiBase) {
     forgetAll,
     checkIn,
     /** the key the API gave this computer when the owner set it up (kept encrypted, never shown) */
-    setDeviceKey: (/** @type {string} */ key) => {
+    setDeviceKey: (/** @type {string | null} */ key) => {
       load();
       store.deviceKey = key;
       persist();

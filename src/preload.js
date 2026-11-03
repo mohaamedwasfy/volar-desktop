@@ -37,6 +37,6 @@ contextBridge.exposeInMainWorld("volarDesktop", {
    * printer (no dialog), "page" with the usual dialog.
    * @param {"receipt" | "labels" | "page"} kind
    */
-  print: (kind) => ipcRenderer.invoke("desktop:print", kind),
+  print: (kind, page) => ipcRenderer.invoke("desktop:print", kind, page),
   openSettings: () => ipcRenderer.send("desktop:settings"),
 });
