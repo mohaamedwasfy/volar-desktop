@@ -279,14 +279,14 @@ function createApi(apiBase) {
    * "removed": the server no longer knows this computer's key (the owner deleted it).
    * @returns {Promise<{ id: string, name: string, branch: { id: string, name: string }, disabled: boolean, command: "LOCK" | "SIGN_OUT" | null } | "removed" | null>}
    */
-  async function checkIn(/** @type {string} */ appVersion) {
+  async function checkIn(/** @type {string} */ appVersion, /** @type {string[]} */ staffIds) {
     load();
     if (!store.deviceKey) return null;
     try {
       const res = await fetch(`${apiBase()}/devices/check-in`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Client-Type": "app", "X-Device-Key": store.deviceKey },
-        body: JSON.stringify({ appVersion, currentUserId: store.current }),
+        body: JSON.stringify({ appVersion, currentUserId: store.current, staffIds }),
         signal: AbortSignal.timeout(10_000),
       });
       const json = await res.json().catch(() => null);

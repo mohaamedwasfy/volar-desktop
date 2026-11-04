@@ -224,7 +224,7 @@ ipcMain.handle("device:setup", async (e, d) => {
     method: "POST",
     url: "https://api.volar.app/v1/devices",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ branchId: str(d.branchId, 64), ...(cfg.device?.id && { replaces: cfg.device.id }) }),
+    body: JSON.stringify({ branchId: str(d.branchId, 64), staffIds: staff.map((s) => s.id), ...(cfg.device?.id && { replaces: cfg.device.id }) }),
   });
   const registered = "networkError" in reg ? null : JSON.parse(reg.body || "{}")?.data;
   if (!registered?.id || !registered?.key) return { ok: false, error: "مقدرتش أسجل الجهاز في السيستم. جرّب تاني." };
@@ -280,7 +280,7 @@ const changed = () => win?.webContents.send("device:changed");
 /** Every half minute: on, its version, who is using it; and what the owner asked from the dashboard. */
 async function checkInNow() {
   if (!cfg?.device || !api.hasDeviceKey() || !app.isReady()) return;
-  const r = await api.checkIn(app.getVersion());
+  const r = await api.checkIn(app.getVersion(), cfg.device.staff.map((s) => s.id));
   if (!r) return;
   // deleted from the dashboard: back to a new computer, exactly like the first start
   if (r === "removed") {
