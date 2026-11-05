@@ -346,8 +346,11 @@ app.whenReady().then(() => {
   applyStartup();
   Menu.setApplicationMenu(null);
   updates.start();
+  // Windows shows notifications under the app's own name only with its id set
+  if (process.platform === "win32") app.setAppUserModelId("com.volar.desktop");
+  // our own screens may copy, and show notifications (sales, requests…) when the person turned them on
   session.defaultSession.setPermissionRequestHandler((wc, permission, done) => {
-    done(isOurs(wc.getURL()) && permission === "clipboard-sanitized-write");
+    done(isOurs(wc.getURL()) && (permission === "clipboard-sanitized-write" || permission === "notifications"));
   });
   void createWindow();
   setTimeout(() => void checkInNow(), 3_000);
