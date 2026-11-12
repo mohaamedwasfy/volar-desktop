@@ -234,13 +234,6 @@ ipcMain.handle("device:setup", async (e, d) => {
   void checkInNow();
   return { ok: true };
 });
-ipcMain.handle("device:unlock", async (e, userId, pin) => {
-  if (!fromScreens(e) || typeof userId !== "string" || typeof pin !== "string" || !/^\d{4,6}$/.test(pin)) return { ok: false, reason: "wrong" };
-  if (!cfg.device?.staff.some((s) => s.id === userId)) return { ok: false, reason: "wrong" };
-  const r = await api.unlock(userId, pin);
-  if (r.ok) void checkInNow();
-  return r;
-});
 /** Sign-in with the phone app: the QR to show, then (every two seconds) whether it was confirmed. */
 ipcMain.handle("device:qr-start", async (e) => {
   if (!fromScreens(e) || !cfg.device || cfg.device.disabled) return { error: "refused" };

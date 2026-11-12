@@ -5,13 +5,11 @@
  *
  * Each person who works on this computer has their own sign-in here: the API's "app" tokens,
  * kept encrypted with Windows' protection in the program's data folder and never handed to
- * the screens. They type their password once on this computer; after that they pick their
- * name and type their PIN. The PIN is checked by the API when it answers (a wrong PIN
- * counts toward their lock there), and against a copy kept here (scrypt) when it doesn't,
- * so the till still opens with no internet.
+ * the screens. Each sign-in is the phone's QR, or the password (and the 2FA code when it's on):
+ * nothing here opens a session without the API. A sign-in kept here only sends, later and as
+ * that person, what they did while the internet was down.
  */
 const { app, safeStorage } = require("electron");
-const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -19,7 +17,7 @@ const path = require("node:path");
 const PLACEHOLDER = "https://api.volar.app/v1";
 
 /**
- * @typedef {{ access: string, refresh: string, name?: string, pin?: { salt: string, hash: string }, misses?: number, lockedUntil?: number }} Account
+ * @typedef {{ access: string, refresh: string, name?: string }} Account
  * @typedef {{ current: string | null, accounts: Record<string, Account>, deviceKey?: string }} Store
  */
 /** @type {Store} */
@@ -52,22 +50,9 @@ function persist() {
 }
 const me = () => (store.current ? store.accounts[store.current] ?? null : null);
 
-const scrypt = (/** @type {string} */ pin, /** @type {string} */ salt) => crypto.scryptSync(pin, Buffer.from(salt, "base64"), 32).toString("base64");
-function keepPin(/** @type {Account} */ acc, /** @type {string} */ pin) {
-  const salt = crypto.randomBytes(16).toString("base64");
-  acc.pin = { salt, hash: scrypt(pin, salt) };
-}
-function pinMatches(/** @type {Account} */ acc, /** @type {string} */ pin) {
-  if (!acc.pin) return false;
-  const a = Buffer.from(scrypt(pin, acc.pin.salt), "base64");
-  const b = Buffer.from(acc.pin.hash, "base64");
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
 
 // headers the screens may not set: the program decides who is calling
 const DROP = new Set(["host", "cookie", "origin", "referer", "authorization", "x-client-type", "content-length", "connection"]);
-const OFFLINE_TRIES = 5;
-const OFFLINE_LOCK_MS = 5 * 60_000;
 
 /** @param {() => string} apiBase the API's address ("http://…/v1") */
 function createApi(apiBase) {
@@ -185,18 +170,6 @@ function createApi(apiBase) {
       } catch {
         /* not JSON */
       }
-      // a PIN set or changed here is kept here too, for when there's no internet
-      if (method === "PUT" && /^\/auth\/pin$/.test(pathAndQuery) && me()) {
-        try {
-          const pin = JSON.parse(typeof body === "string" ? body : body?.toString() ?? "{}").pin;
-          const acc = /** @type {Account} */ (me());
-          if (typeof pin === "string") keepPin(acc, pin);
-          else delete acc.pin;
-          persist();
-        } catch {
-          /* ignore */
-        }
-      }
     }
     if (/^\/auth\/logout/.test(pathAndQuery) && store.current) {
       delete store.accounts[store.current];
@@ -204,66 +177,6 @@ function createApi(apiBase) {
       persist();
     }
     return { status: res.status, headers: { "content-type": res.headers.get("content-type") ?? "" }, body: text };
-  }
-
-  /**
-   * Picks a person and checks their PIN: by the API when it answers, by the copy kept here
-   * when it doesn't.
-   * @returns {Promise<{ ok: true } | { ok: false, reason: "no-session" | "wrong" | "locked" | "no-pin" | "first-time-online", lockedUntil?: number, message?: string }>}
-   */
-  async function unlock(/** @type {string} */ userId, /** @type {string} */ pin) {
-    load();
-    const acc = store.accounts[userId];
-    if (!acc) return { ok: false, reason: "no-session" };
-    if (acc.lockedUntil && acc.lockedUntil > Date.now()) return { ok: false, reason: "locked", lockedUntil: acc.lockedUntil };
-    const tryOnline = async () => {
-      let res = await send("POST", "/auth/pin/verify", { "Content-Type": "application/json" }, JSON.stringify({ pin }), userId);
-      if (res.status === 401) {
-        const r = await refreshFor(userId);
-        if (r === "expired") return { ok: false, reason: /** @type {const} */ ("no-session") };
-        if (r === "failed") throw new Error("offline");
-        res = await send("POST", "/auth/pin/verify", { "Content-Type": "application/json" }, JSON.stringify({ pin }), userId);
-      }
-      return { res };
-    };
-    try {
-      const out = await tryOnline();
-      if ("ok" in out) return out;
-      const { res } = out;
-      const msg = (await res.json().catch(() => ({})))?.error?.message;
-      if (res.ok) {
-        keepPin(acc, pin);
-        acc.misses = 0;
-        delete acc.lockedUntil;
-        store.current = userId;
-        persist();
-        return { ok: true };
-      }
-      if (res.status === 423) return { ok: false, reason: "locked", message: msg };
-      if (res.status === 401) {
-        delete store.accounts[userId];
-        persist();
-        return { ok: false, reason: "no-session" };
-      }
-      if (/PIN متسجل/.test(msg ?? "")) return { ok: false, reason: "no-pin", message: msg };
-      return { ok: false, reason: "wrong", message: msg };
-    } catch {
-      // no internet: the copy kept here
-      if (!acc.pin) return { ok: false, reason: "first-time-online" };
-      if (pinMatches(acc, pin)) {
-        acc.misses = 0;
-        store.current = userId;
-        persist();
-        return { ok: true };
-      }
-      acc.misses = (acc.misses ?? 0) + 1;
-      if (acc.misses >= OFFLINE_TRIES) {
-        acc.lockedUntil = Date.now() + OFFLINE_LOCK_MS;
-        acc.misses = 0;
-      }
-      persist();
-      return acc.lockedUntil && acc.lockedUntil > Date.now() ? { ok: false, reason: "locked", lockedUntil: acc.lockedUntil } : { ok: false, reason: "wrong" };
-    }
   }
 
   /** The owner signed everyone out of this computer: every sign-in here is forgotten. */
@@ -389,7 +302,6 @@ function createApi(apiBase) {
 
   return {
     request,
-    unlock,
     lock,
     ping,
     qrStart,
@@ -411,10 +323,10 @@ function createApi(apiBase) {
       load();
       return store.current;
     },
-    /** who has a sign-in on this computer, and whether their PIN works offline here */
+    /** who has a sign-in on this computer (what they did offline is sent as them) */
     accounts: () => {
       load();
-      return Object.fromEntries(Object.entries(store.accounts).map(([id, a]) => [id, { offlinePin: !!a.pin }]));
+      return Object.fromEntries(Object.keys(store.accounts).map((id) => [id, {}]));
     },
   };
 }

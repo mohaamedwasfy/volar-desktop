@@ -17,7 +17,6 @@ contextBridge.exposeInMainWorld("volarDesktop", {
   device: {
     state: () => ipcRenderer.invoke("device:state"),
     setup: (/** @type {unknown} */ d) => ipcRenderer.invoke("device:setup", d),
-    unlock: (/** @type {string} */ userId, /** @type {string} */ pin) => ipcRenderer.invoke("device:unlock", userId, pin),
     lock: () => ipcRenderer.invoke("device:lock"),
     /** a sign-in QR for the phone app */
     qrStart: () => ipcRenderer.invoke("device:qr-start"),
