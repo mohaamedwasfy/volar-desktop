@@ -341,9 +341,11 @@ app.whenReady().then(() => {
   updates.start();
   // Windows shows notifications under the app's own name only with its id set
   if (process.platform === "win32") app.setAppUserModelId("com.volar.desktop");
-  // our own screens may copy, and show notifications (sales, requests…) when the person turned them on
-  session.defaultSession.setPermissionRequestHandler((wc, permission, done) => {
-    done(isOurs(wc.getURL()) && (permission === "clipboard-sanitized-write" || permission === "notifications"));
+  // our own screens may copy, show notifications (sales, requests…) when the person turned them on,
+  // and use the microphone for a voice message to the assistant (sound only, never the camera)
+  session.defaultSession.setPermissionRequestHandler((wc, permission, done, details) => {
+    const voice = permission === "media" && Array.isArray(details?.mediaTypes) && details.mediaTypes.length > 0 && details.mediaTypes.every((t) => t === "audio");
+    done(isOurs(wc.getURL()) && (permission === "clipboard-sanitized-write" || permission === "notifications" || voice));
   });
   void createWindow();
   setTimeout(() => void checkInNow(), 3_000);
