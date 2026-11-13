@@ -62,7 +62,10 @@
       "category": "public.app-category.business",
       "identity": "-",
       "hardenedRuntime": false,
-      "artifactName": "VOLAR-${version}-mac-${arch}.${ext}"
+      "artifactName": "VOLAR-${version}-mac-${arch}.${ext}",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "VOLAR uses the microphone only for voice messages to the assistant."
+      }
     },
     "dmg": {
       "title": "VOLAR",

@@ -337,7 +337,8 @@ ipcMain.handle("settings:test", async (e, kind) => {
 app.whenReady().then(() => {
   cfg = config.load();
   applyStartup();
-  Menu.setApplicationMenu(null);
+  // no menu bar; a Mac still needs the app and Edit menus, or Cmd+C / Cmd+V / Cmd+Q do nothing
+  Menu.setApplicationMenu(process.platform === "darwin" ? Menu.buildFromTemplate([{ role: "appMenu" }, { role: "editMenu" }]) : null);
   updates.start();
   // Windows shows notifications under the app's own name only with its id set
   if (process.platform === "win32") app.setAppUserModelId("com.volar.desktop");
