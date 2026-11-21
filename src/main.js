@@ -15,7 +15,7 @@
  *
  * The window shows only the program's own screens; any other address opens in the browser.
  */
-const { app, BrowserWindow, Menu, dialog, ipcMain, session, shell } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, net, session, shell } = require("electron");
 const os = require("node:os");
 const path = require("node:path");
 const config = require("./config");
@@ -52,7 +52,7 @@ const arg = (/** @type {string} */ name) => {
 
 // the built-in address; `--api=` only while developing (an installed program ignores it: a
 // changed shortcut must not point the till at another server that would collect passwords)
-const API = (!app.isPackaged && config.cleanUrl(arg("api"))) || config.API_URL;
+const API = (!app.isPackaged && config.cleanUrl(arg("api"))) || config.cleanUrl(config.API_URL);
 /** The device key from pairing (kept encrypted in the settings). */
 const deviceKey = () => (cfg ? config.openKey(cfg.deviceKey) : null);
 const api = createApi({
@@ -212,6 +212,8 @@ async function printOn(wc, kind, page) {
 ipcMain.handle("api:request", (e, r) => (fromScreens(e) ? api.request(r) : { networkError: true, message: "refused" }));
 ipcMain.handle("api:refresh", (e) => (fromScreens(e) ? api.refresh() : "failed"));
 ipcMain.handle("api:ping", (e) => (fromScreens(e) ? api.ping() : false));
+// Why the server can't be reached: is this computer online at all, and what the server answered (null: nothing).
+ipcMain.handle("api:diagnose", async (e) => (fromScreens(e) ? { online: net.isOnline(), status: await api.serverStatus() } : { online: false, status: null }));
 /** The API's address, for what the screens show straight from it (product photos). */
 ipcMain.on("desktop:api-url", (e) => {
   e.returnValue = fromScreens(e) ? API : "";

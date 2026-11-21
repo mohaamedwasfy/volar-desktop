@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld("volarDesktop", {
     request: (/** @type {unknown} */ r) => ipcRenderer.invoke("api:request", r),
     refresh: () => ipcRenderer.invoke("api:refresh"),
     ping: () => ipcRenderer.invoke("api:ping"),
+    /** → { online: boolean (this computer has a network), status: number | null (the API's health answer; null: nothing answered) } */
+    diagnose: () => ipcRenderer.invoke("api:diagnose"),
   },
   /** This computer: paired with a branch (and its till), and who is using it. */
   device: {

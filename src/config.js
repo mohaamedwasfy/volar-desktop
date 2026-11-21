@@ -13,10 +13,11 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 
 /**
- * The VOLAR API this program talks to (the online server). Its paths carry their version
- * ("/v1/…"), so this is the bare address. `--api=` overrides it only while developing.
+ * The VOLAR API this program talks to (the online server), written with its version like the
+ * other apps' settings. The program's paths carry "/v1/…" themselves, so `cleanUrl` drops the
+ * trailing /v1 before use. `--api=` overrides it only while developing.
  */
-const API_URL = "https://nnlqcfqvk6juiacdncat1el4.storiza.store";
+const API_URL = "https://api.volar-eg.com/v1";
 
 /** Settings written by the versions before the new system (0.5.x) are read as a fresh computer. */
 const SCHEMA = 2;

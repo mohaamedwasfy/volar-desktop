@@ -458,15 +458,25 @@ function createApi(o) {
 
   /** Does the API answer right now? */
   async function ping() {
+    return (await serverStatus()) === 200;
+  }
+
+  /**
+   * What the API's health check answers: its HTTP status (200 = fine; 502/503 = the server is up but
+   * the API behind it isn't), or null when nothing answered at all (no internet, DNS, timeout).
+   * @returns {Promise<number | null>}
+   */
+  async function serverStatus() {
     try {
-      const res = await fetch(url("/v1/health"), { signal: AbortSignal.timeout(5_000) });
-      return res.ok;
+      const res = await fetch(url("/v1/health"), { signal: AbortSignal.timeout(8_000) });
+      return res.status;
     } catch {
-      return false;
+      return null;
     }
   }
 
   return {
+    serverStatus,
     request,
     lock,
     ping,
