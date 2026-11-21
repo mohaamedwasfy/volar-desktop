@@ -12,7 +12,9 @@ const msg = (/** @type {string} */ text, ok = false) => {
 async function fill() {
   const [cfg, printers] = await Promise.all([api.get(), api.printers()]);
   if (!cfg) return;
-  $("branch").textContent = cfg.device ? `${cfg.device.branch.name} · كاشير ${cfg.device.tillNumber}${cfg.device.screens?.length ? ` · ${cfg.device.screens.map((/** @type {{ registerName: string, name: string }} */ s) => `${s.registerName} (${s.name})`).join("، ")}` : ""}` : "لسه متربطش بفرع";
+  const d = cfg.device;
+  const scr = d ? (d.screen ?? d.screens?.[0] ?? null) : null;
+  $("branch").textContent = d ? `${d.branch.name} · ${scr ? `كاشير ${d.tillNumber} · ${scr.registerName} (${scr.name})` : "مش كاشير"}` : "لسه متجهزش";
   $("unpair").hidden = !cfg.device;
   for (const id of ["receiptPrinter", "labelPrinter"]) {
     const sel = $(id);

@@ -1,10 +1,10 @@
 // @ts-check
 /**
  * This computer's settings, kept next to the app's data (%APPDATA%\VOLAR\config.json):
- * which branch and till it was paired with, which printer prints what, and how the window
+ * which branch it was set up in (and whether it is a cashier, with its till screen), which printer prints what, and how the window
  * behaves. The API's address is built in (API_URL), not something staff choose.
  *
- * The one secret, the device key the API gave this computer when it was paired, is kept here
+ * The one secret, the device key the API gave this computer when it was set up, is kept here
  * encrypted with Windows' protection (safeStorage): only this Windows account can read it.
  */
 const { app, safeStorage } = require("electron");
@@ -24,7 +24,7 @@ const SCHEMA = 2;
 
 /**
  * @typedef {{ id: string, name: string, registerId: string, registerName: string }} Screen
- * @typedef {{ id: string, name: string, tillNumber: number, branch: { id: string, code: string, name: string }, screens: Screen[], pairedAt: string }} Device
+ * @typedef {{ id: string, name: string, tillNumber: number, branch: { id: string, code: string, name: string }, cashier: boolean, screen: Screen | null, screens: Screen[], pairedAt: string }} Device
  * @typedef {{
  *   schema: number,
  *   device: Device | null,

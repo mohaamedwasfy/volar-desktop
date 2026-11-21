@@ -8,7 +8,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("volarDesktop", {
   /** This bridge's shape (the admin checks it before using it). */
-  protocol: 2,
+  protocol: 3,
   /** The API's address ("https://…", no /v1), for what the screens load straight from it (photos). */
   apiUrl: String(ipcRenderer.sendSync("desktop:api-url") || ""),
   /** The API, called by the program as whoever is signed in (the tokens never come here). */
@@ -20,14 +20,22 @@ contextBridge.exposeInMainWorld("volarDesktop", {
     /** → { online: boolean (this computer has a network), status: number | null (the API's health answer; null: nothing answered) } */
     diagnose: () => ipcRenderer.invoke("api:diagnose"),
   },
-  /** This computer: paired with a branch (and its till), and who is using it. */
+  /** This computer: set up in a branch (a cashier or not, with its till screen), and who is using it. */
   device: {
-    /** { paired, device: { id, name, tillNumber, branch, screens } | null, current: { id, name } | null, computerName } */
+    /** { paired, device: { id, name, tillNumber, branch, cashier, screen, screens } | null, current: { id, name } | null, computerName } */
     state: () => ipcRenderer.invoke("device:state"),
-    /** a pairing code to show (an admin types it in Settings → Devices) */
-    pairStart: (/** @type {boolean} */ fresh) => ipcRenderer.invoke("device:pair-start", !!fresh),
-    /** was the code approved? (then this computer keeps its key and is paired) */
-    pairClaim: () => ipcRenderer.invoke("device:pair-claim"),
+    /** the setup QR to show (an administrator scans it with the phone app) → { id, url, expiresAt } | { error } */
+    setupStart: (/** @type {boolean} */ fresh) => ipcRenderer.invoke("device:setup-start", !!fresh),
+    /** was it approved? (then this computer keeps its key; whoever signed in to set it up is signed out) */
+    setupClaim: () => ipcRenderer.invoke("device:setup-claim"),
+    /** the administrator signed in here: the branches (and registers) they may choose → { ok, data } | { ok: false, status, code, message } */
+    setupPreview: () => ipcRenderer.invoke("device:setup-preview"),
+    /** { branchId, name, cashier, registerId? } → { ok, data } | { ok: false, … } */
+    setupApprove: (/** @type {unknown} */ input) => ipcRenderer.invoke("device:setup-approve", input),
+    /** the branch's people for signing in without a phone → { ok, people: [{ id, name, initials }] } | { ok: false, … } */
+    staff: () => ipcRenderer.invoke("device:staff"),
+    /** { userId, password } → { ok, mfaRequired, challenge? } | { ok: false, status, code, message } */
+    login: (/** @type {unknown} */ input) => ipcRenderer.invoke("device:login", input),
     /** a sign-in QR for the phone app */
     qrStart: () => ipcRenderer.invoke("device:qr-start"),
     /** was it approved on a phone? (then that person is signed in here) */

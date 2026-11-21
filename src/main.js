@@ -3,10 +3,11 @@
  * VOLAR on the shop's computers: a program of its own.
  *
  *   - The screens are packaged inside it (ui.js) and open with no internet at all.
- *   - The computer is paired with a branch once (a 6-character code an admin approves); its
- *     device key is kept encrypted in the settings (config.js).
+ *   - The computer is set up once: it shows a QR an administrator scans with the phone app (or an
+ *     administrator signs in on it), choosing its branch and whether it is a cashier (then its till
+ *     screen on a register). Its device key is kept encrypted in the settings (config.js).
  *   - The program calls the API itself (api.js) as whoever signed in on the branch's sign-in
- *     screen (the phone's QR or a password), its tokens encrypted on this computer, out of reach
+ *     screen (the phone's QR, or a name from the branch's list and its password), its tokens encrypted on this computer, out of reach
  *     of the screens. Lock: the next cashier signs in.
  *   - When the API can't be reached the screens work from what they saved and queue what
  *     the till does; it's all sent when the API answers again (Volar-admin, the till's offline.ts).
@@ -240,27 +241,39 @@ ipcMain.handle("device:state", (e) => {
   // the screens just opened (or reloaded): ask the API who this computer is, at most every 10 seconds
   if (Date.now() - lastCheck > 10_000) void checkDevice();
   const paired = !!cfg.device && !!deviceKey();
-  return { paired, device: paired ? cfg.device : null, current: api.current(), computerName: os.hostname() };
+  const d = paired && cfg.device ? cfg.device : null;
+  // set up by an older version: cashier = it has a till screen (until the API's answer comes)
+  const device = d ? { ...d, cashier: d.cashier ?? d.screens.length > 0, screen: d.screen ?? d.screens[0] ?? null } : null;
+  return { paired, device, current: api.current(), computerName: os.hostname() };
 });
-/** A pairing code to show (the same one while it is still good, unless a new one is asked for). */
-ipcMain.handle("device:pair-start", (e, fresh) => (fromScreens(e) && !cfg.device ? api.pairStart(!!fresh) : { error: "refused" }));
-/** Polled every few seconds while the code shows: approved, this computer keeps its key (encrypted) and learns who it is. */
-ipcMain.handle("device:pair-claim", async (e) => {
+/** The setup QR to show (the same one while it is still good, unless a new one is asked for). */
+ipcMain.handle("device:setup-start", (e, fresh) => (fromScreens(e) && !cfg.device ? api.setupStart(!!fresh) : { error: "refused" }));
+/**
+ * Polled every few seconds while the setup QR shows: approved (from a phone, or here), this computer
+ * keeps its key (encrypted) and learns who it is. Whoever signed in here to set it up is signed out:
+ * the next person signs in on the branch's screen, with a session of this computer.
+ */
+ipcMain.handle("device:setup-claim", async (e) => {
   if (!fromScreens(e) || cfg.device) return { status: "EXPIRED", message: "refused" };
-  const r = await api.pairClaim();
-  if (r.status !== "PAIRED" || !("key" in r)) return r;
+  const r = await api.setupClaim();
+  if (r.status !== "DONE" || !("key" in r)) return r;
   cfg = {
     ...cfg,
     deviceKey: config.sealKey(r.key),
-    device: { id: r.deviceId, name: os.hostname(), tillNumber: r.tillNumber, branch: r.branch, screens: [], pairedAt: new Date().toISOString() },
+    device: { id: r.deviceId, name: os.hostname(), tillNumber: r.tillNumber, branch: r.branch, cashier: r.cashier, screen: null, screens: [], pairedAt: new Date().toISOString() },
   };
   config.save(cfg);
+  await api.endSession();
   await checkDevice();
-  // whoever is signed in already (the owner, right after the shop's first setup) works on this computer now
-  await api.bindCurrent();
   changed();
-  return { status: "PAIRED", device: cfg.device };
+  return { status: "DONE", device: cfg.device };
 });
+/** The administrator signed in here: what they may choose for this computer, then their choice. */
+ipcMain.handle("device:setup-preview", (e) => (fromScreens(e) && !cfg.device ? api.setupPreview() : { ok: false, status: 403, code: "FORBIDDEN", message: "refused" }));
+ipcMain.handle("device:setup-approve", (e, input) => (fromScreens(e) && !cfg.device ? api.setupApprove(input) : { ok: false, status: 403, code: "FORBIDDEN", message: "refused" }));
+/** Signing in without a phone: the branch's people, then a name and its password. */
+ipcMain.handle("device:staff", (e) => (fromScreens(e) && cfg.device ? api.staff() : { ok: false, status: 403, code: "FORBIDDEN", message: "refused" }));
+ipcMain.handle("device:login", (e, input) => (fromScreens(e) && cfg.device ? api.deviceLogin(input) : { ok: false, status: 403, code: "FORBIDDEN", message: "refused" }));
 /** Sign-in with the phone app: the QR to show, then (every few seconds) whether it was approved. */
 ipcMain.handle("device:qr-start", (e) => (fromScreens(e) && cfg.device ? api.qrStart() : { error: "refused" }));
 ipcMain.handle("device:qr-claim", (e, id) => {
@@ -313,12 +326,12 @@ ipcMain.handle("settings:get", (e) => {
   const { deviceKey: _key, ...shown } = cfg;
   return { ...shown, version: app.getVersion(), update: updates.status() };
 });
-/** Unpair this computer here (it stays in the admin's list until stopped there): back to the pairing code. */
+/** Unpair this computer here (it stays in the admin's list until stopped there): back to the setup QR. */
 ipcMain.handle("settings:unpair", async (e) => {
   if (!fromSettings(e) || !settingsWin || !cfg.device) return false;
   const { response } = await dialog.showMessageBox(settingsWin, {
     type: "warning", buttons: ["فك الربط", "رجوع"], defaultId: 1, cancelId: 1, title: "فك ربط الكمبيوتر",
-    message: "الكمبيوتر هيرجع زي الجديد: كل اللي داخلين عليه هيخرجوا، ولازم يتربط تاني بكود.",
+    message: "الكمبيوتر هيرجع زي الجديد: كل اللي داخلين عليه هيخرجوا، ولازم يتجهز تاني بكود QR.",
   });
   if (response !== 0) return false;
   forgetDevice();
