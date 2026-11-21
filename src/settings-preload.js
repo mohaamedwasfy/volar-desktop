@@ -8,5 +8,6 @@ contextBridge.exposeInMainWorld("settings", {
   save: (/** @type {unknown} */ next) => ipcRenderer.invoke("settings:save", next),
   test: (/** @type {"receipt" | "labels"} */ kind) => ipcRenderer.invoke("settings:test", kind),
   installUpdate: () => ipcRenderer.send("settings:install-update"),
+  unpair: () => ipcRenderer.invoke("settings:unpair"),
 });
 

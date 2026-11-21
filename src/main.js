@@ -3,16 +3,20 @@
  * VOLAR on the shop's computers: a program of its own.
  *
  *   - The screens are packaged inside it (ui.js) and open with no internet at all.
- *   - The program calls the API itself (api.js): signed in as an app, its tokens encrypted
- *     on this computer, out of reach of the screens.
+ *   - The computer is paired with a branch once (a 6-character code an admin approves); its
+ *     device key is kept encrypted in the settings (config.js).
+ *   - The program calls the API itself (api.js) as whoever signed in on the branch's sign-in
+ *     screen (the phone's QR or a password), its tokens encrypted on this computer, out of reach
+ *     of the screens. Lock: the next cashier signs in.
  *   - When the API can't be reached the screens work from what they saved and queue what
- *     the till does; it's all sent when the API answers again (Volar-admin src/lib/offline).
+ *     the till does; it's all sent when the API answers again (Volar-admin, the till's offline.ts).
  *   - Receipts and labels print straight to the printers chosen on this computer.
  *   - Updates come by themselves (updates.js).
  *
  * The window shows only the program's own screens; any other address opens in the browser.
  */
 const { app, BrowserWindow, Menu, dialog, ipcMain, session, shell } = require("electron");
+const os = require("node:os");
 const path = require("node:path");
 const config = require("./config");
 const updates = require("./updates");
@@ -40,7 +44,7 @@ app.on("second-instance", () => {
   }
 });
 
-/** `--api=http://localhost:4000/v1` and `--ui=http://localhost:3002` while developing. */
+/** `--api=http://localhost:4200` and `--ui=http://localhost:3200` while developing. */
 const arg = (/** @type {string} */ name) => {
   const a = process.argv.find((x) => x.startsWith(`--${name}=`));
   return a ? a.slice(name.length + 3) : null;
@@ -49,7 +53,15 @@ const arg = (/** @type {string} */ name) => {
 // the built-in address; `--api=` only while developing (an installed program ignores it: a
 // changed shortcut must not point the till at another server that would collect passwords)
 const API = (!app.isPackaged && config.cleanUrl(arg("api"))) || config.API_URL;
-const api = createApi(() => API);
+/** The device key from pairing (kept encrypted in the settings). */
+const deviceKey = () => (cfg ? config.openKey(cfg.deviceKey) : null);
+const api = createApi({
+  base: () => API,
+  deviceKey: () => deviceKey(),
+  branchId: () => cfg?.device?.branch.id ?? null,
+  onChange: () => changed(),
+  onDeviceGone: () => void checkDevice(),  // also on a session refused for good: was the computer stopped?
+});
 
 /** volar://app/… (Node calls a custom scheme's origin "null", so scheme and host are compared). */
 const isOurs = (/** @type {string} */ url) => {
@@ -200,60 +212,61 @@ async function printOn(wc, kind, page) {
 ipcMain.handle("api:request", (e, r) => (fromScreens(e) ? api.request(r) : { networkError: true, message: "refused" }));
 ipcMain.handle("api:refresh", (e) => (fromScreens(e) ? api.refresh() : "failed"));
 ipcMain.handle("api:ping", (e) => (fromScreens(e) ? api.ping() : false));
+/** The API's address, for what the screens show straight from it (product photos). */
+ipcMain.on("desktop:api-url", (e) => {
+  e.returnValue = fromScreens(e) ? API : "";
+});
 
-// ─── this computer: its branch, its staff, who is using it ─────────────────────
+// ─── this computer: its branch and till (from pairing), who is using it ─────────
+
+/** Tells the screens the computer's state changed (paired, signed in, locked, stopped in the admin). */
+function changed() {
+  win?.webContents.send("device:changed");
+}
+
+/** Unpaired (removed or stopped in the admin, or its key unreadable): back to a new computer. */
+function forgetDevice() {
+  if (!cfg.device && !cfg.deviceKey) return;
+  cfg = { ...cfg, device: null, deviceKey: "" };
+  config.save(cfg);
+  api.forgetAll();
+  changed();
+}
 
 ipcMain.handle("device:state", (e) => {
   if (!fromScreens(e)) return null;
-  // set up by an older version (before computers were registered): no key, so no QR and no
-  // remote control until the owner sets it up again
-  return { device: cfg.device, current: api.current(), accounts: api.accounts(), registered: !!cfg.device?.id && api.hasDeviceKey() };
+  // the screens just opened (or reloaded): ask the API who this computer is, at most every 10 seconds
+  if (Date.now() - lastCheck > 10_000) void checkDevice();
+  const paired = !!cfg.device && !!deviceKey();
+  return { paired, device: paired ? cfg.device : null, current: api.current(), computerName: os.hostname() };
 });
-/** Only the owner (or whoever runs the settings) sets the computer up, signed in on it right now. */
-ipcMain.handle("device:setup", async (e, d) => {
-  if (!fromScreens(e) || typeof d !== "object" || !d) return { ok: false, error: "refused" };
-  const meRes = await api.request({ method: "GET", url: "https://api.volar.app/v1/auth/me", headers: {}, body: null });
-  if ("networkError" in meRes) return { ok: false, error: "الإعداد محتاج نت" };
-  const who = JSON.parse(meRes.body || "{}")?.data;
-  if (!who || !(who.isOwner || who.permissions?.includes("settings.manage"))) return { ok: false, error: "إعداد الجهاز للمالك بس" };
-  const str = (/** @type {unknown} */ v, n = 120) => (typeof v === "string" ? v.slice(0, n) : "");
-  const staff = (Array.isArray(d.staff) ? d.staff : []).slice(0, 200).map((/** @type {any} */ s) => ({ id: str(s?.id, 64), name: str(s?.name), username: str(s?.username, 60), role: str(s?.role, 60) })).filter((s) => s.id && s.name);
-  if (!str(d.branchId, 64) || !staff.length) return { ok: false, error: "اختار الفرع وواحد على الأقل من الموظفين" };
-  // registered with the API: the owner sees it in the dashboard and can lock, stop or sign out of it
-  const reg = await api.request({
-    method: "POST",
-    url: "https://api.volar.app/v1/devices",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ branchId: str(d.branchId, 64), staffIds: staff.map((s) => s.id), ...(cfg.device?.id && { replaces: cfg.device.id }) }),
-  });
-  const registered = "networkError" in reg ? null : JSON.parse(reg.body || "{}")?.data;
-  if (!registered?.id || !registered?.key) return { ok: false, error: "مقدرتش أسجل الجهاز في السيستم. جرّب تاني." };
-  api.setDeviceKey(registered.key);
-  cfg = { ...cfg, device: { id: registered.id, name: registered.name, branchId: str(d.branchId, 64), branchName: str(d.branchName), staff, setupBy: who.id, setupAt: new Date().toISOString(), disabled: false } };
+/** A pairing code to show (the same one while it is still good, unless a new one is asked for). */
+ipcMain.handle("device:pair-start", (e, fresh) => (fromScreens(e) && !cfg.device ? api.pairStart(!!fresh) : { error: "refused" }));
+/** Polled every few seconds while the code shows: approved, this computer keeps its key (encrypted) and learns who it is. */
+ipcMain.handle("device:pair-claim", async (e) => {
+  if (!fromScreens(e) || cfg.device) return { status: "EXPIRED", message: "refused" };
+  const r = await api.pairClaim();
+  if (r.status !== "PAIRED" || !("key" in r)) return r;
+  cfg = {
+    ...cfg,
+    deviceKey: config.sealKey(r.key),
+    device: { id: r.deviceId, name: os.hostname(), tillNumber: r.tillNumber, branch: r.branch, screens: [], pairedAt: new Date().toISOString() },
+  };
   config.save(cfg);
-  void checkInNow();
-  return { ok: true };
+  await checkDevice();
+  // whoever is signed in already (the owner, right after the shop's first setup) works on this computer now
+  await api.bindCurrent();
+  changed();
+  return { status: "PAIRED", device: cfg.device };
 });
-/** Sign-in with the phone app: the QR to show, then (every two seconds) whether it was confirmed. */
-ipcMain.handle("device:qr-start", async (e) => {
-  if (!fromScreens(e) || !cfg.device || cfg.device.disabled) return { error: "refused" };
-  const r = await api.qrStart();
-  // refused (not just offline): it may have been removed; ask right away instead of at the next check-in
-  if ("error" in r && r.error !== "offline") void checkInNow();
-  return r;
-});
-ipcMain.handle("device:qr-claim", async (e, id) => {
+/** Sign-in with the phone app: the QR to show, then (every few seconds) whether it was approved. */
+ipcMain.handle("device:qr-start", (e) => (fromScreens(e) && cfg.device ? api.qrStart() : { error: "refused" }));
+ipcMain.handle("device:qr-claim", (e, id) => {
   if (!fromScreens(e) || typeof id !== "string" || id.length > 64 || !cfg.device) return { status: "EXPIRED" };
-  const staff = cfg.device.staff;
-  const r = await api.qrClaim(id, (userId) => userId === cfg.device?.setupBy || staff.some((s) => s.id === userId));
-  if (r.status === "SIGNED_IN") void checkInNow();
-  return r;
+  return api.qrClaim(id);
 });
 ipcMain.handle("device:lock", (e) => {
-  if (fromScreens(e)) {
-    api.lock();
-    void checkInNow();
-  }
+  if (fromScreens(e)) api.lock();
   return true;
 });
 ipcMain.handle("desktop:info", (e) =>
@@ -267,44 +280,48 @@ ipcMain.on("desktop:settings", (e) => {
   if (fromScreens(e)) openSettings();
 });
 
-/** Tells the screens the computer's state changed (locked, signed out, stopped from the dashboard). */
-const changed = () => win?.webContents.send("device:changed");
-
-/** Every half minute: on, its version, who is using it; and what the owner asked from the dashboard. */
-async function checkInNow() {
-  if (!cfg?.device || !api.hasDeviceKey() || !app.isReady()) return;
-  const r = await api.checkIn(app.getVersion(), cfg.device.staff.map((s) => s.id));
+/**
+ * Who this computer is, from the API (at start and every few minutes): stopped or removed in the
+ * admin → back to pairing; its branch renamed or a till screen added → kept up to date.
+ */
+let lastCheck = 0;
+async function checkDevice() {
+  if (!cfg?.device || !app.isReady()) return;
+  lastCheck = Date.now();
+  if (!deviceKey()) return forgetDevice();
+  const r = await api.deviceMe();
   if (!r) return;
-  // deleted from the dashboard: back to a new computer, exactly like the first start
-  if (r === "removed") {
-    api.forgetAll();
-    api.setDeviceKey(null);
-    cfg = { ...cfg, device: null };
+  if (r === "gone") return forgetDevice();
+  if (!cfg.device) return;
+  const next = { ...r, pairedAt: cfg.device.pairedAt };
+  if (JSON.stringify(next) !== JSON.stringify(cfg.device)) {
+    cfg = { ...cfg, device: next };
     config.save(cfg);
     changed();
-    return;
   }
-  let dirty = false;
-  if (!!r.disabled !== !!cfg.device.disabled) {
-    cfg = { ...cfg, device: { ...cfg.device, disabled: r.disabled } };
-    dirty = true;
-  }
-  if (r.branch && (r.branch.id !== cfg.device.branchId || r.branch.name !== cfg.device.branchName || r.name !== cfg.device.name)) {
-    cfg = { ...cfg, device: { ...cfg.device, branchId: r.branch.id, branchName: r.branch.name, name: r.name } };
-    dirty = true;
-  }
-  if (dirty) config.save(cfg);
-  if (r.command === "SIGN_OUT" || r.disabled) api.forgetAll();
-  else if (r.command === "LOCK") api.lock();
-  if (dirty || r.command) changed();
 }
-setInterval(() => void checkInNow(), 30_000);
+setInterval(() => void checkDevice(), 3 * 60_000);
 
 // ─── the settings window (settings-preload.js) ─────────────────────────────────
 
 const fromSettings = (/** @type {Electron.IpcMainInvokeEvent | Electron.IpcMainEvent} */ e) => !!settingsWin && e.sender === settingsWin.webContents;
 
-ipcMain.handle("settings:get", (e) => (fromSettings(e) ? { ...cfg, version: app.getVersion(), update: updates.status() } : null));
+ipcMain.handle("settings:get", (e) => {
+  if (!fromSettings(e)) return null;
+  const { deviceKey: _key, ...shown } = cfg;
+  return { ...shown, version: app.getVersion(), update: updates.status() };
+});
+/** Unpair this computer here (it stays in the admin's list until stopped there): back to the pairing code. */
+ipcMain.handle("settings:unpair", async (e) => {
+  if (!fromSettings(e) || !settingsWin || !cfg.device) return false;
+  const { response } = await dialog.showMessageBox(settingsWin, {
+    type: "warning", buttons: ["فك الربط", "رجوع"], defaultId: 1, cancelId: 1, title: "فك ربط الكمبيوتر",
+    message: "الكمبيوتر هيرجع زي الجديد: كل اللي داخلين عليه هيخرجوا، ولازم يتربط تاني بكود.",
+  });
+  if (response !== 0) return false;
+  forgetDevice();
+  return true;
+});
 ipcMain.on("settings:install-update", (e) => {
   if (fromSettings(e)) updates.installNow();
 });
@@ -349,7 +366,7 @@ app.whenReady().then(() => {
     done(isOurs(wc.getURL()) && (permission === "clipboard-sanitized-write" || permission === "notifications" || voice));
   });
   void createWindow();
-  setTimeout(() => void checkInNow(), 3_000);
+  setTimeout(() => void checkDevice(), 3_000);
 });
 
 app.on("window-all-closed", () => app.quit());

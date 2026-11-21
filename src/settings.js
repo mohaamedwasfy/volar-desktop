@@ -12,7 +12,8 @@ const msg = (/** @type {string} */ text, ok = false) => {
 async function fill() {
   const [cfg, printers] = await Promise.all([api.get(), api.printers()]);
   if (!cfg) return;
-  $("branch").textContent = cfg.device ? `${cfg.device.branchName} · ${cfg.device.staff.length} موظف` : "لسه متعملهوش إعداد";
+  $("branch").textContent = cfg.device ? `${cfg.device.branch.name} · كاشير ${cfg.device.tillNumber}${cfg.device.screens?.length ? ` · ${cfg.device.screens.map((/** @type {{ registerName: string, name: string }} */ s) => `${s.registerName} (${s.name})`).join("، ")}` : ""}` : "لسه متربطش بفرع";
+  $("unpair").hidden = !cfg.device;
   for (const id of ["receiptPrinter", "labelPrinter"]) {
     const sel = $(id);
     sel.innerHTML = "";
@@ -69,6 +70,9 @@ async function save() {
 }
 
 $("save").addEventListener("click", () => void save());
+$("unpair").addEventListener("click", async () => {
+  if (await api.unpair()) void fill();
+});
 $("installUpdate").addEventListener("click", () => api.installUpdate());
 for (const b of document.querySelectorAll("[data-test]")) {
   b.addEventListener("click", async () => {

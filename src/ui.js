@@ -4,7 +4,7 @@
  * served from this computer by the program itself and shown at volar://app. Nothing about
  * them needs the internet: only the data does.
  *
- * `--ui=http://localhost:3002` (development) shows the dashboard's dev server instead.
+ * `--ui=http://localhost:3200` (development) shows an admin already running (`next start`) instead.
  */
 const { app, net, protocol, utilityProcess } = require("electron");
 const fs = require("node:fs");
@@ -79,10 +79,11 @@ async function startUi(devUrl) {
 
 /** Waits until the screens' server answers (it takes a second or two to start). */
 async function waitFor(base) {
-  // a small file, not a page: the first page render takes a few seconds
+  // any answer will do (the admin has no service worker to ask for): the server is listening.
+  // The first render of "/" takes a few seconds, so each try waits for it.
   for (let i = 0; i < 120; i++) {
     try {
-      await fetch(`${base}/sw.js`, { signal: AbortSignal.timeout(3_000) });
+      await fetch(`${base}/`, { method: "HEAD", signal: AbortSignal.timeout(15_000) });
       return;
     } catch {
       await new Promise((r) => setTimeout(r, 150));
