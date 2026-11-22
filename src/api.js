@@ -391,6 +391,8 @@ function createApi(o) {
     const body = {
       id: setup.id, secret: setup.secret, branchId: String(i.branchId ?? ""), name: String(i.name ?? "").slice(0, 60), cashier: !!i.cashier,
       ...(i.cashier && typeof i.registerId === "string" && { registerId: i.registerId }),
+      // a drawer another computer uses is shared only when asked (otherwise the API makes a new one)
+      ...(i.cashier && typeof i.registerId === "string" && i.shareRegister === true && { shareRegister: true }),
     };
     try {
       const r = await asCurrent("POST", "/v1/auth/device/setup/approve", body);
