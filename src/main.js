@@ -117,7 +117,8 @@ async function createWindow() {
     if (input.type !== "keyDown") return;
     const key = input.key.toLowerCase();
     if (input.control && input.shift && key === "s") { e.preventDefault(); openSettings(); }
-    else if (key === "f5" || (input.control && key === "r")) { e.preventDefault(); wc.reload(); }
+    // F1–F10 and Esc belong to the screens (the till's F5 is «دوّر على منتج»): only Ctrl+R / Ctrl+Shift+R reload
+    else if (input.control && !input.alt && key === "r") { e.preventDefault(); if (input.shift) wc.reloadIgnoringCache(); else wc.reload(); }
     else if (input.control && input.shift && key === "i" && !app.isPackaged) { e.preventDefault(); wc.toggleDevTools(); }
     else if (key === "f11" && !cfg.kiosk) { e.preventDefault(); win?.setFullScreen(!win.isFullScreen()); }
   });
@@ -280,8 +281,9 @@ ipcMain.handle("device:qr-claim", (e, id) => {
   if (!fromScreens(e) || typeof id !== "string" || id.length > 64 || !cfg.device) return { status: "EXPIRED" };
   return api.qrClaim(id);
 });
-ipcMain.handle("device:lock", (e) => {
-  if (fromScreens(e)) api.lock();
+ipcMain.handle("device:lock", async (e) => {
+  // the sign-in screen shows at once; the person's session on the server ends too (later, if offline)
+  if (fromScreens(e)) await api.lock();
   return true;
 });
 ipcMain.handle("desktop:info", (e) =>
@@ -307,6 +309,7 @@ async function checkDevice() {
   const r = await api.deviceMe();
   if (!r) return;
   if (r === "gone") return forgetDevice();
+  if (r === "stopped" || r === "removed") return stoppedInAdmin(r);
   if (!cfg.device) return;
   const next = { ...r, pairedAt: cfg.device.pairedAt };
   if (JSON.stringify(next) !== JSON.stringify(cfg.device)) {
@@ -317,6 +320,21 @@ async function checkDevice() {
 }
 setInterval(() => void checkDevice(), 3 * 60_000);
 
+/** Stopped (or removed) from the admin: said clearly, then back to setting the computer up. */
+let tellingStopped = false;
+async function stoppedInAdmin(/** @type {"stopped" | "removed"} */ why) {
+  if (tellingStopped) return;
+  tellingStopped = true;
+  try {
+    const message = why === "stopped" ? "الجهاز ده اتوقف من الإدارة" : "الجهاز ده اتشال من الإدارة";
+    const detail = "كل اللي كانوا داخلين عليه خرجوا. عشان يشتغل تاني لازم يتجهز من جديد بكود QR (أو يتشغّل من الإدارة الأول).";
+    if (win && !win.isDestroyed()) await dialog.showMessageBox(win, { type: "warning", buttons: ["تمام"], defaultId: 0, title: "VOLAR", message, detail });
+    forgetDevice();
+  } finally {
+    tellingStopped = false;
+  }
+}
+
 // ─── the settings window (settings-preload.js) ─────────────────────────────────
 
 const fromSettings = (/** @type {Electron.IpcMainInvokeEvent | Electron.IpcMainEvent} */ e) => !!settingsWin && e.sender === settingsWin.webContents;
@@ -326,7 +344,7 @@ ipcMain.handle("settings:get", (e) => {
   const { deviceKey: _key, ...shown } = cfg;
   return { ...shown, version: app.getVersion(), update: updates.status() };
 });
-/** Unpair this computer here (it stays in the admin's list until stopped there): back to the setup QR. */
+/** Unpair this computer here: the server is told (the computer is stopped there, its sessions end), then back to the setup QR. */
 ipcMain.handle("settings:unpair", async (e) => {
   if (!fromSettings(e) || !settingsWin || !cfg.device) return false;
   const { response } = await dialog.showMessageBox(settingsWin, {
@@ -334,6 +352,14 @@ ipcMain.handle("settings:unpair", async (e) => {
     message: "الكمبيوتر هيرجع زي الجديد: كل اللي داخلين عليه هيخرجوا، ولازم يتجهز تاني بكود QR.",
   });
   if (response !== 0) return false;
+  if ((await api.unpair()) === "offline") {
+    const { response: anyway } = await dialog.showMessageBox(settingsWin, {
+      type: "warning", buttons: ["فكّه من هنا بس", "رجوع"], defaultId: 1, cancelId: 1, title: "فك ربط الكمبيوتر",
+      message: "مقدرناش نوصل للسيرفر عشان نبلّغه.",
+      detail: "لو فكّيته من هنا بس، هيفضل شغال في الإدارة لحد ما حد يوقّفه من هناك (الإدارة ← الأجهزة).",
+    });
+    if (anyway !== 0) return false;
+  }
   forgetDevice();
   return true;
 });

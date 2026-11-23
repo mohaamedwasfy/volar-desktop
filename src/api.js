@@ -23,7 +23,7 @@ const path = require("node:path");
 
 /**
  * @typedef {{ access: string, refresh: string, name: string }} Account
- * @typedef {{ v: 2, current: string | null, accounts: Record<string, Account> }} Store
+ * @typedef {{ v: 2, current: string | null, accounts: Record<string, Account>, pending?: Account[] }} Store
  * @typedef {{ accessToken: string, refreshToken: string }} Tokens
  * @typedef {{ status: number, headers: Record<string, string>, body: string | Buffer }} Answer
  */
@@ -283,6 +283,7 @@ function createApi(o) {
     const had = !!store.current;
     store.accounts = {};
     store.current = null;
+    store.pending = []; // the server ended this computer's sessions with it
     persist();
     if (had) o.onChange();
   }
@@ -294,15 +295,16 @@ function createApi(o) {
 
   /**
    * Who this computer is: its branch, till number, whether it is a cashier, and its till screen.
-   * @returns {Promise<import("./config").Device | "gone" | null>} null: no answer right now
+   * @returns {Promise<import("./config").Device | "gone" | "stopped" | "removed" | null>} null: no answer right now; "gone": no key here; "stopped" / "removed": in the admin
    */
   async function deviceMe() {
     if (!o.deviceKey()) return "gone";
     try {
       const r = await call("GET", "/v1/core/devices/me", { device: true, timeout: 10_000 });
-      if (deviceRefused(r)) return "gone";
+      if (deviceRefused(r)) return r.json?.error?.code === "DEVICE_DISABLED" ? "stopped" : "removed";
       const d = r.status === 200 ? r.json?.data : null;
       if (!d?.id) return null;
+      void retryPending();
       const screens = d.screens ?? [];
       return { id: d.id, name: d.name, tillNumber: d.tillNumber, branch: d.branch, cashier: d.cashier ?? screens.length > 0, screen: d.screen ?? screens[0] ?? null, screens, pairedAt: "" };
     } catch {
@@ -512,13 +514,64 @@ function createApi(o) {
     }
   }
 
-  /** Nobody is using the computer now (the branch's sign-in screen shows). */
-  function lock() {
+  /**
+   * Ends one person's session on the server (renewed first when its access token ran out). No
+   * answer right now: kept to end later (retryPending), so a locked computer never leaves a live session.
+   * @param {Account} acc
+   */
+  async function signOut(acc) {
+    try {
+      let r = await call("POST", "/v1/auth/logout", { token: acc.access, body: {}, timeout: 8_000 });
+      if (r.status === 401 && acc.refresh) {
+        const n = await call("POST", "/v1/auth/refresh", { body: { refreshToken: acc.refresh }, timeout: 8_000 });
+        const d = n.json?.data;
+        if (n.status === 200 && d?.accessToken) r = await call("POST", "/v1/auth/logout", { token: d.accessToken, body: {}, timeout: 8_000 });
+        else if (n.status >= 500 || n.status === 429) throw new Error("later");
+      }
+      if (r.status >= 500 || r.status === 429) throw new Error("later");
+    } catch {
+      store.pending = [...(store.pending ?? []), acc].slice(-20);
+      persist();
+    }
+  }
+  /** Sessions a lock couldn't end at the time (no connection): ended now. */
+  async function retryPending() {
     load();
-    if (!store.current) return;
+    const left = store.pending ?? [];
+    if (!left.length) return;
+    store.pending = [];
+    persist();
+    for (const acc of left) await signOut(acc);
+  }
+
+  /** Nobody is using the computer now (the branch's sign-in screen shows): their session on the server ends too. */
+  async function lock() {
+    load();
+    const id = store.current;
+    if (!id) return;
+    const acc = store.accounts[id];
+    delete store.accounts[id];
     store.current = null;
     persist();
     o.onChange();
+    if (acc) await signOut(acc);
+  }
+
+  /**
+   * «فك الربط» here: the server is told first (the computer is stopped there, its sessions end); the
+   * caller then forgets the key. "offline": the server couldn't be told.
+   * @returns {Promise<"done" | "offline">}
+   */
+  async function unpair() {
+    if (!o.deviceKey()) return "done";
+    try {
+      const r = await call("POST", "/v1/core/devices/me/unpair", { device: true, timeout: 10_000 });
+      // stopped or removed there already: nothing left to tell
+      if ((r.status === 200 && r.json?.data?.ok) || deviceRefused(r)) return "done";
+      return "offline";
+    } catch {
+      return "offline";
+    }
   }
 
   /** Does the API answer right now? */
@@ -544,6 +597,7 @@ function createApi(o) {
     serverStatus,
     request,
     lock,
+    unpair,
     ping,
     forgetAll,
     deviceMe,
