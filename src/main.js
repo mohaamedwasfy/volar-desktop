@@ -183,7 +183,7 @@ async function printerFor(wc, kind) {
  * The paper comes from the screen that knows it (a receipt's real length, the label size), so a
  * printer's own default can't turn it sideways or feed blank paper. Checked: it comes from a page.
  * @param {unknown} page
- * @returns {{ pageSize: string | { width: number, height: number }, margins?: { marginType: "none" } } | {}}
+ * @returns {{ pageSize: string | { width: number, height: number }, landscape?: boolean, margins?: { marginType: "none" } } | {}}
  */
 function paperOf(page) {
   if (typeof page !== "object" || !page) return {};
@@ -191,8 +191,13 @@ function paperOf(page) {
   if (paper === "A4") return { pageSize: "A4" };
   const ok = (/** @type {unknown} */ n, /** @type {number} */ min, /** @type {number} */ max) => typeof n === "number" && Number.isFinite(n) && n >= min && n <= max;
   if (!ok(widthMm, 20, 300) || !ok(heightMm, 10, 2000)) return {};
-  // Electron takes microns here
-  return { pageSize: { width: Math.round(widthMm * 1000), height: Math.round(heightMm * 1000) }, margins: { marginType: "none" } };
+  // Electron takes microns here. A page wider than tall (a 38×25 sticker) is given upright and turned
+  // (landscape): Chromium swaps a custom size whose width is over its height, and the sticker printer
+  // then got a sideways or empty page (owner's note 6: «زرار الطباعة مش شغال»).
+  const w = Math.round(widthMm * 1000);
+  const h = Math.round(heightMm * 1000);
+  if (w > h) return { pageSize: { width: h, height: w }, landscape: true, margins: { marginType: "none" } };
+  return { pageSize: { width: w, height: h }, margins: { marginType: "none" } };
 }
 
 /**
