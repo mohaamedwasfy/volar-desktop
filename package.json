@@ -1,7 +1,7 @@
 {
   "name": "volar-desktop",
   "productName": "VOLAR",
-  "version": "0.7.8",
+  "version": "0.7.9",
   "description": "VOLAR for the shop's computers: its own program, working with or without internet.",
   "private": true,
   "main": "src/main.js",
@@ -14,7 +14,8 @@
     "dist": "npm run build:ui && electron-builder --win nsis",
     "release": "npm run build:ui && node scripts/ensure-release.mjs && electron-builder --win nsis --publish always",
     "dist:mac": "npm run build:ui && electron-builder --mac",
-    "release:mac": "npm run build:ui && node scripts/ensure-release.mjs && electron-builder --mac --publish always"
+    "release:mac": "npm run build:ui && node scripts/ensure-release.mjs && electron-builder --mac --publish always",
+    "test:relay": "node scripts/test-relay.mjs"
   },
   "build": {
     "appId": "com.volar.desktop",

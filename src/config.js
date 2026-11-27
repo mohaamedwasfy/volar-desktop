@@ -34,13 +34,21 @@ const SCHEMA = 2;
  *   kiosk: boolean,
  *   startWithWindows: boolean,
  *   deviceId: string,
+ *   fingerprintRelay: boolean,
+ *   fingerprintPort: number,
+ *   fingerprintLinked: boolean,
+ *   firewall: "" | "added" | "exists" | "needs-admin" | "failed",
  * }} Config
  */
 
 const file = () => path.join(app.getPath("userData"), "config.json");
 
 /** @returns {Config} */
-const defaults = () => ({ schema: SCHEMA, device: null, deviceKey: "", receiptPrinter: "", labelPrinter: "", kiosk: false, startWithWindows: false, deviceId: crypto.randomUUID() });
+const defaults = () => ({ schema: SCHEMA, device: null, deviceKey: "", receiptPrinter: "", labelPrinter: "", kiosk: false, startWithWindows: false, deviceId: crypto.randomUUID(),
+  // the fingerprint device through this computer (iclock-relay.js): «استقبل البصمة من الجهاز» even before a
+  // device is linked to it in the admin; the port the device is set to; whether the admin linked one (kept for
+  // a start with no internet); the Windows firewall rule for it
+  fingerprintRelay: false, fingerprintPort: 8081, fingerprintLinked: false, firewall: "" });
 
 /** @returns {Config} */
 function load() {

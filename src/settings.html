@@ -42,6 +42,29 @@
       <select id="labelPrinter"></select>
     </section>
 
+    <section id="fp" class="fp">
+      <div class="row">
+        <label>جهاز البصمة</label>
+        <span id="fpState" class="badge">…</span>
+      </div>
+      <label class="switch"><input type="checkbox" id="fingerprintRelay" /> <span>استقبل البصمة من الجهاز</span></label>
+      <p class="hint">لو جهاز البصمة متربط بالكمبيوتر ده في الإدارة (الحضور ← أجهزة البصمة ← «عن طريق كمبيوتر الكاشير») الكمبيوتر بيستقبل منه لوحده. شغّلها هنا لو عايز تجرّب قبل ما تربطه.</p>
+      <div id="fpInfo" hidden>
+        <p class="hint">اكتب في إعدادات الجهاز (Cloud Server / ADMS) العنوان ده والبورت، و<b>HTTPS مقفول</b>:</p>
+        <ul id="fpAddresses" class="addrs" dir="ltr"></ul>
+        <p class="hint" id="fpSeen"></p>
+        <ul id="fpDevices" class="devs"></ul>
+        <div id="fpFirewall" class="update" hidden>
+          <span id="fpFirewallText"></span>
+          <button type="button" id="fpFirewallBtn" class="link">افتح البورت في الجدار الناري</button>
+        </div>
+      </div>
+      <div class="row port">
+        <label for="fingerprintPort">البورت</label>
+        <input id="fingerprintPort" type="number" min="1024" max="65535" dir="ltr" />
+      </div>
+    </section>
+
     <section class="switches">
       <label class="switch"><input type="checkbox" id="kiosk" /> <span>ملء الشاشة دايمًا (وضع الكاشير)</span></label>
       <label class="switch"><input type="checkbox" id="startWithWindows" /> <span>يفتح لوحده مع تشغيل الكمبيوتر</span></label>

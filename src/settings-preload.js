@@ -9,5 +9,7 @@ contextBridge.exposeInMainWorld("settings", {
   test: (/** @type {"receipt" | "labels"} */ kind) => ipcRenderer.invoke("settings:test", kind),
   installUpdate: () => ipcRenderer.send("settings:install-update"),
   unpair: () => ipcRenderer.invoke("settings:unpair"),
+  relay: (/** @type {boolean} */ check) => ipcRenderer.invoke("settings:relay", !!check),
+  firewall: () => ipcRenderer.invoke("settings:firewall"),
 });
 

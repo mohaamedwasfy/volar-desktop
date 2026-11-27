@@ -574,6 +574,46 @@ function createApi(o) {
     }
   }
 
+  // ─── the fingerprint device, passed on through this computer (iclock-relay.js) ───
+
+  /**
+   * One request of the fingerprint device, passed on as it came (method, path after /iclock, query, body,
+   * content type), signed with this computer's key, never a person's session. The API's answer comes back
+   * as it is; no answer at all throws (the device then keeps its punches and tries again).
+   * @param {{ method: string, path: string, contentType: string, body: Buffer | undefined, deviceIp: string }} f
+   * @returns {Promise<{ status: number, contentType: string, body: string }>}
+   */
+  async function relayIclock(f) {
+    const key = o.deviceKey();
+    if (!key) throw new Error("الكمبيوتر لسه متجهزش");
+    /** @type {Record<string, string>} */
+    const h = { "X-Client-Type": "desktop", "User-Agent": ua, "X-Device-Key": key, "X-Iclock-Device-Ip": f.deviceIp };
+    // the device sends plain text; never JSON (the API reads its body as it is)
+    if (f.body !== undefined) h["Content-Type"] = !f.contentType || /json/i.test(f.contentType) ? "text/plain" : f.contentType.slice(0, 100);
+    const res = await fetch(url(`/v1/attendance/iclock-relay${f.path}`), { method: f.method, headers: h, body: f.body, signal: AbortSignal.timeout(30_000) });
+    const body = await res.text();
+    if (res.status === 401 && /DEVICE_UNKNOWN|DEVICE_DISABLED/.test(body)) o.onDeviceGone();
+    return { status: res.status, contentType: res.headers.get("content-type") ?? "text/plain", body };
+  }
+
+  /**
+   * The fingerprint devices linked to this computer (relay mode), with when each was last seen.
+   * @returns {Promise<{ devices: Array<{ id: string, name: string, serialNumber: string, active: boolean, lastSeenAt: string | null, lastIp: string | null, online: boolean }> } | null>} null: no answer now
+   */
+  async function relayStatus() {
+    if (!o.deviceKey()) return null;
+    try {
+      const r = await call("GET", "/v1/attendance/iclock-relay", { device: true, timeout: 10_000 });
+      if (deviceRefused(r)) {
+        o.onDeviceGone();
+        return null;
+      }
+      return r.status === 200 && Array.isArray(r.json?.data?.devices) ? { devices: r.json.data.devices } : null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Does the API answer right now? */
   async function ping() {
     return (await serverStatus()) === 200;
@@ -610,6 +650,8 @@ function createApi(o) {
     deviceLogin,
     qrStart,
     qrClaim,
+    relayIclock,
+    relayStatus,
     refresh: () => {
       load();
       return store.current ? refreshFor(store.current) : Promise.resolve(/** @type {const} */ ("expired"));

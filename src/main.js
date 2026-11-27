@@ -13,16 +13,21 @@
  *     the till does; it's all sent when the API answers again (Volar-admin, the till's offline.ts).
  *   - Receipts and labels print straight to the printers chosen on this computer.
  *   - Updates come by themselves (updates.js).
+ *   - The fingerprint device can reach the server through it (iclock-relay.js): it listens on the shop's
+ *     network (port 8081) while a device is linked to this computer in the admin (or «استقبل البصمة من
+ *     الجهاز» is on in its settings), and passes the device's requests on with its own key.
  *
  * The window shows only the program's own screens; any other address opens in the browser.
  */
 const { app, BrowserWindow, Menu, dialog, ipcMain, net, session, shell } = require("electron");
 const os = require("node:os");
+const { exec, execFile } = require("node:child_process");
 const path = require("node:path");
 const config = require("./config");
 const updates = require("./updates");
 const { startUi, stopUi, ORIGIN } = require("./ui");
 const { createApi } = require("./api");
+const { createRelay, lanAddresses } = require("./iclock-relay");
 
 /** The VOLAR icon (the same as the phone app's), in the taskbar and the window corner. */
 const ICON = path.join(__dirname, "assets", "icon.ico");
@@ -136,7 +141,7 @@ function openSettings(firstRun = false) {
   if (settingsWin) return settingsWin.focus();
   settingsWin = new BrowserWindow({
     width: 560,
-    height: 720,
+    height: 820,
     parent: win ?? undefined,
     modal: !!win && !firstRun,
     resizable: false,
@@ -236,7 +241,8 @@ function changed() {
 /** Unpaired (removed or stopped in the admin, or its key unreadable): back to a new computer. */
 function forgetDevice() {
   if (!cfg.device && !cfg.deviceKey) return;
-  cfg = { ...cfg, device: null, deviceKey: "" };
+  cfg = { ...cfg, device: null, deviceKey: "", fingerprintLinked: false };
+  void syncRelay();
   config.save(cfg);
   api.forgetAll();
   changed();
@@ -271,6 +277,7 @@ ipcMain.handle("device:setup-claim", async (e) => {
   config.save(cfg);
   await api.endSession();
   await checkDevice();
+  void syncRelay();
   changed();
   return { status: "DONE", device: cfg.device };
 });
@@ -325,6 +332,108 @@ async function checkDevice() {
 }
 setInterval(() => void checkDevice(), 3 * 60_000);
 
+// ─── the fingerprint device through this computer (iclock-relay.js) ─────────────
+
+const relay = createRelay({
+  forward: (f) => api.relayIclock(f),
+  log: (msg, extra) => console.warn(msg, extra ?? ""),
+});
+/** The devices linked to this computer, as the API last said (shown in the settings). */
+let relayDevices = /** @type {Array<{ id: string, name: string, serialNumber: string, active: boolean, lastSeenAt: string | null, lastIp: string | null, online: boolean }>} */ ([]);
+let relayCheckedAt = /** @type {string | null} */ (null);
+
+/**
+ * Listens for the fingerprint device while this computer is set up and the admin linked a device to it
+ * (or «استقبل البصمة من الجهاز» is on); stops otherwise. With no answer from the API, what it said last.
+ */
+let relaySyncing = Promise.resolve();
+function syncRelay() {
+  // one at a time (the timer, a saved setting and a setup may ask together): never two servers on one port
+  relaySyncing = relaySyncing.then(syncRelayNow, syncRelayNow);
+  return relaySyncing;
+}
+async function syncRelayNow() {
+  if (!cfg) return;
+  const paired = !!cfg.device && !!deviceKey();
+  if (paired) {
+    const r = await api.relayStatus();
+    if (r) {
+      relayDevices = r.devices;
+      relayCheckedAt = new Date().toISOString();
+      const linked = r.devices.some((d) => d.active);
+      if (linked !== cfg.fingerprintLinked) {
+        cfg = { ...cfg, fingerprintLinked: linked };
+        config.save(cfg);
+      }
+    }
+  } else {
+    relayDevices = [];
+  }
+  if (paired && (cfg.fingerprintRelay || cfg.fingerprintLinked)) {
+    if (await relay.start(cfg.fingerprintPort)) void ensureFirewall();
+  } else await relay.stop();
+}
+setInterval(() => void syncRelay(), 3 * 60_000);
+
+/**
+ * The Windows firewall: the device on the shop's network must be let in to this program's port. A rule
+ * (this program, TCP <port>, from the local network only) is added when Windows lets us without an
+ * administrator (the program run as one); otherwise the settings say how, with a button that asks Windows
+ * for an administrator once (UAC). Windows may also ask by itself the first time the program listens.
+ */
+const RULE = "VOLAR fingerprint device";
+const sh = (/** @type {string} */ cmd) =>
+  new Promise((resolve) => exec(cmd, { windowsHide: true, timeout: 20_000 }, (err, stdout) => resolve({ ok: !err, out: String(stdout ?? "") })));
+const ruleCmd = (/** @type {number} */ port) =>
+  `netsh advfirewall firewall add rule name="${RULE}" dir=in action=allow protocol=TCP localport=${port} remoteip=localsubnet profile=any program="${process.execPath}" enable=yes`;
+async function firewallRuleThere(/** @type {number} */ port) {
+  const r = /** @type {{ ok: boolean, out: string }} */ (await sh(`netsh advfirewall firewall show rule name="${RULE}" verbose`));
+  return r.ok && new RegExp(`\\b${port}\\b`).test(r.out);
+}
+let firewallChecked = 0;
+async function ensureFirewall() {
+  if (process.platform !== "win32" || firewallChecked === cfg.fingerprintPort) return;
+  firewallChecked = cfg.fingerprintPort;
+  let state = /** @type {import("./config").Config["firewall"]} */ ("exists");
+  if (!(await firewallRuleThere(cfg.fingerprintPort))) {
+    const r = /** @type {{ ok: boolean }} */ (await sh(ruleCmd(cfg.fingerprintPort)));
+    state = r.ok && (await firewallRuleThere(cfg.fingerprintPort)) ? "added" : "needs-admin";
+  }
+  if (state !== cfg.firewall) {
+    cfg = { ...cfg, firewall: state };
+    config.save(cfg);
+  }
+}
+/** «افتح البورت في الجدار الناري»: Windows asks for an administrator once, then the rule is checked again. */
+async function addFirewallRuleAsAdmin() {
+  if (process.platform !== "win32") return cfg.firewall;
+  const line = `netsh advfirewall firewall delete rule name="${RULE}" & ${ruleCmd(cfg.fingerprintPort)}`;
+  const ps = `Start-Process -FilePath cmd.exe -Verb RunAs -WindowStyle Hidden -Wait -ArgumentList '/c ${line.replace(/'/g, "''")}'`;
+  // its own arguments (no shell in between): refused or cancelled at the Windows prompt, the rule just isn't there
+  await new Promise((resolve) => execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { windowsHide: true, timeout: 120_000 }, () => resolve(null)));
+  cfg = { ...cfg, firewall: (await firewallRuleThere(cfg.fingerprintPort)) ? "added" : "failed" };
+  config.save(cfg);
+  firewallChecked = cfg.fingerprintPort;
+  return cfg.firewall;
+}
+
+/** What the settings show: whether it listens, the addresses to type in the device, when it last called. */
+function relayInfo() {
+  const st = relay.status();
+  return {
+    ...st,
+    enabled: cfg.fingerprintRelay,
+    linked: cfg.fingerprintLinked,
+    paired: !!cfg.device && !!deviceKey(),
+    port: cfg.fingerprintPort,
+    addresses: lanAddresses().map((a) => ({ name: a.name, address: a.address })),
+    devices: relayDevices,
+    checkedAt: relayCheckedAt,
+    firewall: cfg.firewall,
+    windows: process.platform === "win32",
+  };
+}
+
 /** Stopped (or removed) from the admin: said clearly, then back to setting the computer up. */
 let tellingStopped = false;
 async function stoppedInAdmin(/** @type {"stopped" | "removed"} */ why) {
@@ -347,7 +456,18 @@ const fromSettings = (/** @type {Electron.IpcMainInvokeEvent | Electron.IpcMainE
 ipcMain.handle("settings:get", (e) => {
   if (!fromSettings(e)) return null;
   const { deviceKey: _key, ...shown } = cfg;
-  return { ...shown, version: app.getVersion(), update: updates.status() };
+  return { ...shown, version: app.getVersion(), update: updates.status(), relay: relayInfo() };
+});
+/** The fingerprint device's state now (the settings refresh it every few seconds); `check`: ask the API again. */
+ipcMain.handle("settings:relay", async (e, check) => {
+  if (!fromSettings(e)) return null;
+  if (check) await syncRelay();
+  return relayInfo();
+});
+ipcMain.handle("settings:firewall", async (e) => {
+  if (!fromSettings(e)) return null;
+  await addFirewallRuleAsAdmin();
+  return relayInfo();
 });
 /** Unpair this computer here: the server is told (the computer is stopped there, its sessions end), then back to the setup QR. */
 ipcMain.handle("settings:unpair", async (e) => {
@@ -376,9 +496,15 @@ ipcMain.handle("settings:save", async (e, next) => {
   if (!fromSettings(e) || typeof next !== "object" || !next) return { ok: false, error: "refused" };
   const str = (/** @type {unknown} */ v) => (typeof v === "string" ? v.slice(0, 200) : "");
   const kioskChanged = !!next.kiosk !== cfg.kiosk;
-  cfg = { ...cfg, receiptPrinter: str(next.receiptPrinter), labelPrinter: str(next.labelPrinter), kiosk: !!next.kiosk, startWithWindows: !!next.startWithWindows };
+  const port = Number(next.fingerprintPort);
+  const fingerprintPort = Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : cfg.fingerprintPort;
+  cfg = {
+    ...cfg, receiptPrinter: str(next.receiptPrinter), labelPrinter: str(next.labelPrinter), kiosk: !!next.kiosk, startWithWindows: !!next.startWithWindows,
+    fingerprintRelay: !!next.fingerprintRelay, fingerprintPort, ...(fingerprintPort !== cfg.fingerprintPort && { firewall: /** @type {const} */ ("") }),
+  };
   config.save(cfg);
   applyStartup();
+  await syncRelay();
   if (win && kioskChanged) win.setKiosk(cfg.kiosk);
   return { ok: true, reachable: await api.ping() };
 });
@@ -413,10 +539,14 @@ app.whenReady().then(() => {
   });
   void createWindow();
   setTimeout(() => void checkDevice(), 3_000);
+  setTimeout(() => void syncRelay(), 5_000);
 });
 
 app.on("window-all-closed", () => app.quit());
-app.on("will-quit", () => stopUi());
+app.on("will-quit", () => {
+  stopUi();
+  void relay.stop();
+});
 
 process.on("uncaughtException", (err) => {
   dialog.showErrorBox("VOLAR", `حصلت مشكلة: ${err.message}`);
